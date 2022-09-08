@@ -8,3 +8,8 @@ type User struct {
 	Artist string  `json:"artist"`
 	Price  float64 `json:"price"`
 }
+
+type SendOTP struct {
+	PhoneNumber string `json:"phonenumber"`
+	OTP         string `json:"otp"`
+}

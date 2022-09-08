@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -23,10 +24,10 @@ func ConnectDB() *gorm.DB {
 	dbname := os.Getenv("POST_GRE_DATABASE")
 
 	psqlconn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
-	fmt.Print(psqlconn)
 	db, err := gorm.Open(postgres.Open(psqlconn), &gorm.Config{})
-	fmt.Println("Connected!")
+	fmt.Println("*********------------Database is Connected!---------------*******")
 	db.AutoMigrate(&models.User{})
+	fmt.Println("*********------------AutoMigrate Models!---------------*******")
 
 	return db
 }
