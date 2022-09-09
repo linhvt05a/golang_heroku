@@ -1,16 +1,18 @@
 package handlers
 
 import (
+	"example/kenva-be/commons"
+	"example/kenva-be/db"
 	"example/kenva-be/models"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/twilio/twilio-go"
 	openapi "github.com/twilio/twilio-go/rest/verify/v2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func CreateTwilioAuth() *twilio.RestClient {
@@ -28,33 +30,48 @@ func CreateTwilioAuth() *twilio.RestClient {
 }
 
 func SendOTP(c *gin.Context) {
-	var phone models.SendOTP
-	c.BindJSON(&phone)
+	phone := models.SendOTP{}
+	c.ShouldBindJSON(&phone)
 	fmt.Printf("log phone '%s'\n", phone.PhoneNumber)
+	fmt.Printf("log pass '%s'\n", phone.Password)
 	client := CreateTwilioAuth()
 	params := &openapi.CreateVerificationParams{}
-	params.SetTo(phone.PhoneNumber)
+	formatPhone := phone.PhoneNumber
+	params.SetTo(formatPhone)
 	params.SetChannel("sms")
 	resp, err := client.VerifyV2.CreateVerification(os.Getenv("VERIFY_SERVICE_SID"), params)
 
-	if err != nil {
-		fmt.Println("Eroorrrr sent otp", err.Error())
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "message": err.Error()})
+	errValidate := commons.ValidateBodyRequest(c, phone)
 
-	} else {
-		fmt.Printf("Sent verification '%s'\n", *resp.Sid)
-		c.IndentedJSON(http.StatusOK, gin.H{"status": http.StatusOK, "message": "OTP was sent!", "vsid": *resp.Sid})
+	if errValidate == nil {
+		if err != nil {
+			fmt.Println("Eroorrrr sent otp", err.Error())
+			errorRes := models.Response{
+				Message:    "Lỗi gửi mã xác nhận.Xin vui lòng thử lại.",
+				StatusCode: http.StatusBadRequest,
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"errors": &errorRes})
+			return
+		} else {
+			fmt.Printf("Sent verification '%s'\n", *resp.Sid)
+			otpRes := models.OTPResponse{
+				Sid:     *resp.Sid,
+				Message: "OTP was sent!",
+			}
+			c.JSON(http.StatusOK, gin.H{"data": &otpRes})
+			return
+		}
 	}
+
 }
 
 func VerifyOTP(c *gin.Context) {
 	client := CreateTwilioAuth()
+	db := db.ConnectDB()
 	var verifyOTP models.SendOTP
-
 	c.BindJSON(&verifyOTP)
 	fmt.Println("PHONE", verifyOTP.PhoneNumber)
 	fmt.Println("OTP", verifyOTP.OTP)
-	// fmt.Scanln(&verifyOTP.OTP)
 
 	params := &openapi.CreateVerificationCheckParams{}
 	params.SetTo(verifyOTP.PhoneNumber)
@@ -64,12 +81,43 @@ func VerifyOTP(c *gin.Context) {
 
 	if err != nil {
 		fmt.Println(err.Error())
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"status": http.StatusInternalServerError, "message": err.Error()})
+		errorRes := models.Response{
+			Message:    "Lỗi gửi mã xác nhận.Xin vui lòng thử lại.",
+			StatusCode: http.StatusAccepted,
+		}
+		c.JSON(http.StatusAccepted, gin.H{"data": &errorRes})
+		return
 	} else if *resp.Status == "approved" {
 		fmt.Println("Correct!")
-		c.IndentedJSON(http.StatusOK, gin.H{"status": http.StatusOK, "message": *resp.Status})
+		password := []byte(verifyOTP.Password)
+		hashedPassword, err := bcrypt.GenerateFromPassword(password, bcrypt.DefaultCost)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(hashedPassword))
+
+		user := models.User{
+			Status:      *resp.Status,
+			Message:     "Xác thực thành công!",
+			PhoneNumber: verifyOTP.PhoneNumber,
+			Password:    string(hashedPassword),
+			OTP:         verifyOTP.OTP,
+			IsVerified:  *resp.Status == "approved",
+		}
+
+		db.Create(&user)
+		if err != nil {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": &user})
+		return
 	} else {
 		fmt.Println("Incorrect!")
-		c.IndentedJSON(http.StatusForbidden, gin.H{"status": http.StatusForbidden, "message": "Incorrect OTP !"})
+		errorRes := models.Response{
+			Message:    "Mã xác nhận không đúng.Xin vui lòng thử lại.",
+			StatusCode: http.StatusFound,
+		}
+		c.JSON(http.StatusFound, gin.H{"errors": &errorRes})
+		return
 	}
 }
