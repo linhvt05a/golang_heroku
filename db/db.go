@@ -28,6 +28,5 @@ func ConnectDB() *gorm.DB {
 	fmt.Println("*********------------Database is Connected!---------------*******")
 	db.AutoMigrate(&models.User{})
 	fmt.Println("*********------------AutoMigrate Models!---------------*******")
-
 	return db
 }
