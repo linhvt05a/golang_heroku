@@ -12,7 +12,7 @@ func Router() {
 	router.POST("/login", handlers.Login)
 	router.POST("/send-otp", handlers.SendOTP)
 	router.POST("/verify-otp", handlers.VerifyOTP)
-	// router.GET("/albums/:id", getAlbumByID)
-	// router.POST("/albums", postAlbums)
+	router.POST("/create-password", handlers.UpdatePassword)
+	router.POST("/forgot-password", handlers.ForgotPassword)
 	router.Run("localhost:8088")
 }

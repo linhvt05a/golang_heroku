@@ -2,7 +2,6 @@ package commons
 
 import (
 	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"gopkg.in/validator.v2"
 )

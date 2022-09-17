@@ -9,6 +9,15 @@ import (
 	"io"
 )
 
+func CreateHashKey() (key string) {
+	bytes := make([]byte, 16) //generate a random 32 byte key for AES-256
+	if _, err := rand.Read(bytes); err != nil {
+		panic(err.Error())
+	}
+	keyHash := hex.EncodeToString(bytes) //encode key
+	return keyHash
+}
+
 func EncryptPassword(encryptString, keyEncrypt string) string {
 	// Load your secret key from a safe place and reuse it across multiple
 	// NewCipher calls. (Obviously don't use this example key for anything
@@ -39,7 +48,7 @@ func EncryptPassword(encryptString, keyEncrypt string) string {
 	return fmt.Sprintf("%x", ciphertext)
 }
 
-func DecryptPassword(keyDecrypt, strDecrypt string) (decrypted string) {
+func DecryptPassword(keyDecrypt, strDecrypt string) (decrypted string, err error) {
 	// Load your secret key from a safe place and reuse it across multiple
 	// NewCipher calls. (Obviously don't use this example key for anything
 	// real.) If you want to convert a passphrase to a key, use a suitable
@@ -49,13 +58,13 @@ func DecryptPassword(keyDecrypt, strDecrypt string) (decrypted string) {
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 
 	// The IV needs to be unique, but not secure. Therefore it's common to
 	// include it at the beginning of the ciphertext.
 	if len(ciphertext) < aes.BlockSize {
-		panic("ciphertext too short")
+		return "", err
 	}
 	iv := ciphertext[:aes.BlockSize]
 	ciphertext = ciphertext[aes.BlockSize:]
@@ -64,5 +73,5 @@ func DecryptPassword(keyDecrypt, strDecrypt string) (decrypted string) {
 
 	// XORKeyStream can work in-place if the two arguments are the same.
 	stream.XORKeyStream(ciphertext, ciphertext)
-	return fmt.Sprintf("%s", ciphertext)
+	return fmt.Sprintf("%s", ciphertext), nil
 }
