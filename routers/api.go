@@ -14,5 +14,5 @@ func Router() {
 	router.POST("/verify-otp", handlers.VerifyOTP)
 	router.POST("/create-password", handlers.UpdatePassword)
 	router.POST("/forgot-password", handlers.ForgotPassword)
-	router.Run(":8088")
+	router.Run()
 }
