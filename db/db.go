@@ -1,30 +1,24 @@
 package db
 
 import (
+	"example/kenva-be/configs"
 	"example/kenva-be/models"
 	"fmt"
 	"log"
-	"os"
-
-	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func ConnectDB() *gorm.DB {
-	// connection string
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatalf("err loading: %v", err)
+	config, errEnv := configs.LoadConfig(".")
+	if errEnv != nil {
+		log.Fatalf("could not load config: %v", errEnv)
 	}
-	host := os.Getenv("HOST")
-	port := os.Getenv("PORT")
-	user := os.Getenv("POST_GRE_USER")
-	password := os.Getenv("PASSWORD")
-	dbname := os.Getenv("POST_GRE_DATABASE")
-
-	psqlconn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
-	db, err := gorm.Open(postgres.Open(psqlconn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(config.PostgresUrl), &gorm.Config{})
+	if err != nil {
+		log.Fatal("Failed to connect DB")
+		return nil
+	}
 	fmt.Println("*********------------Database is Connected!---------------*******")
 	db.AutoMigrate(&models.User{})
 	fmt.Println("*********------------AutoMigrate Models!---------------*******")

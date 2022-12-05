@@ -14,12 +14,15 @@ type User struct {
 	KeyAuthorize      string `json:"keyAuthorize"`
 	Type              int    `json:"type"`
 	Code              int    `json:"code"`
+	AccessToken       string `json:"access_token"`
 }
 
 type UserRequestInfo struct {
 	PhoneNumber string `json:"phonenumber"`
 	OTP         string `json:"otp"`
 	Password    string `json:"password" validate:"min=8"`
+	NewPass     string `json:"newPass"`
+	OldPass     string `json:"oldPass"`
 }
 
 type OTPResponse struct {

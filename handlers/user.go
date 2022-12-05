@@ -7,95 +7,107 @@ import (
 	"example/kenva-be/models"
 	"fmt"
 	"net/http"
-	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	openapi "github.com/twilio/twilio-go/rest/verify/v2"
 )
 
 var (
-	CLIENT             = *configs.CreateTwilioAuth()
-	DB                 = *db.ConnectDB()
-	VERIFY_SERVICE_SID = os.Getenv("VERIFY_SERVICE_SID")
-	GIN                *gin.Context
+	CLIENT = *commons.CreateTwilioAuth()
+	DB     = *db.ConnectDB()
 )
 
-func CheckUserIsExist(phone string) bool {
+func CheckUserIsExist(phone string) (bool, int, error) {
 	var user models.User
 	fmt.Println("phone", phone)
-	DB.Raw("SELECT phone_number FROM users WHERE phone_number = ?", phone).Scan(&user)
+	err := DB.Raw("SELECT phone_number,is_verified FROM users WHERE phone_number = ?", phone).Scan(&user).Error
+	if err != nil {
+		return false, 0, err
+	}
 	fmt.Println("user.PhoneNumber", user.PhoneNumber)
-	return len(user.PhoneNumber) > 0
+	fmt.Println("is_verified", user.IsVerified)
+	return bool(user.IsVerified), len(user.PhoneNumber), nil
 }
 
 func Register(c *gin.Context) {
 	var bodyReq models.UserRequestInfo
 	c.BindJSON(&bodyReq)
-	isUserExist := CheckUserIsExist(bodyReq.PhoneNumber)
-	fmt.Println("check user existed", isUserExist)
-
-	if isUserExist {
+	isVerified, phoneLengh, err := CheckUserIsExist(bodyReq.PhoneNumber)
+	fmt.Println("isVerified", isVerified)
+	fmt.Println("phoneLenght", phoneLengh)
+	fmt.Println("err", err)
+	if err != nil {
 		user := models.ErrorsResponse{
-			StatusCode: http.StatusBadRequest,
-			Message:    "User does existed. Please login",
+			StatusCode: http.StatusInternalServerError,
+			Message:    "Internal Server Error",
 		}
-		commons.Errors(c, http.StatusBadRequest, user)
-	} else {
+		commons.Errors(c, http.StatusInternalServerError, user)
+		return
+	}
+	if phoneLengh > 0 && !isVerified {
+		user := models.User{Type: 0, Status: "Register", PhoneNumber: bodyReq.PhoneNumber}
+		DB.Model(&user).Where("phone_number = ?", bodyReq.PhoneNumber).Updates(&user)
+		commons.Response(c, http.StatusOK, user)
+		return
+	}
+	if phoneLengh == 0 {
 		keyHash := commons.CreateHashKey()
 		encrypted := commons.EncryptPassword(bodyReq.Password, keyHash)
 		user := models.User{
-			Type:              1,
-			Message:           "Register",
+			Type:              0,
+			Status:            strconv.Itoa(http.StatusOK),
 			OTP:               bodyReq.OTP,
 			Password:          encrypted,
 			PhoneNumber:       bodyReq.PhoneNumber,
 			KeyEncryptDecrypt: keyHash,
+			IsVerified:        isVerified,
 		}
 		DB.Create(&user)
 		commons.Response(c, http.StatusOK, user)
+		return
+	}
+	if phoneLengh > 0 && isVerified {
+		user := models.ErrorsResponse{
+			StatusCode: http.StatusFound,
+			Message:    "User already exists.Please back to login!",
+		}
+		commons.Errors(c, http.StatusFound, user)
+		return
 	}
 	return
 }
 
 func CheckAccountLogin(phone, password string, c *gin.Context) bool {
 	var user models.User
-	// body := models.UserRequestInfo{PhoneNumber: phone, Password: password}
-	// commons.ValidateBodyRequest(c, body)
-
-	err := DB.Raw("SELECT id, phone_number,key_encrypt_decrypt,key_authorize, password FROM users WHERE phone_number = ?", phone).Scan(&user).Error
+	err := DB.Raw("SELECT id, is_verified, phone_number,key_encrypt_decrypt,key_authorize, password FROM users WHERE phone_number = ?", phone).Scan(&user).Error
 	if err != nil {
 		commons.Errors(c, http.StatusInternalServerError, err.Error())
+		return false
 	}
-	if phone == user.PhoneNumber {
-		decrypted, err := commons.DecryptPassword(user.KeyEncryptDecrypt, user.Password)
-		if err != nil {
-			commons.Errors(c, http.StatusBadRequest, err.Error())
-		}
-		fmt.Println("decrypted :", decrypted)
-
-		if password != decrypted && user.PhoneNumber == phone {
-			errorRes := models.Response{
-				Message:    "Sai tài khoản hoặc mật khẩu.",
-				StatusCode: http.StatusBadRequest,
-			}
-			commons.Errors(c, http.StatusBadRequest, &errorRes)
-			return false
-		}
-		if user.PhoneNumber != phone && user.Password != decrypted {
-			errorRes := models.Response{
-				Message:    "Tài khoản chưa tồn tại.Vui lòng đăng ký",
-				StatusCode: http.StatusNotFound,
-			}
-			commons.Errors(c, http.StatusNotFound, &errorRes)
-			return false
-		}
-
-		if phone == user.PhoneNumber && password == decrypted {
-			return true
-		}
+	decrypted, _ := commons.DecryptPassword(user.KeyEncryptDecrypt, user.Password)
+	fmt.Println("decrypted :", decrypted)
+	fmt.Println("is_verified", user.IsVerified)
+	if phone == user.PhoneNumber && password == decrypted && user.IsVerified {
+		return true
 	}
-
-	return false
+	if user.PhoneNumber != phone {
+		errorRes := models.Response{
+			Message:    "Tài khoản chưa tồn tại.Vui lòng đăng ký",
+			StatusCode: http.StatusNotFound,
+		}
+		commons.Errors(c, http.StatusNotFound, &errorRes)
+		return false
+	}
+	if phone == user.PhoneNumber && password != decrypted {
+		errorRes := models.Response{
+			Message:    "Sai tài khoản hoặc mật khẩu.",
+			StatusCode: http.StatusBadRequest,
+		}
+		commons.Errors(c, http.StatusBadRequest, &errorRes)
+		return false
+	}
+	return true
 }
 
 func Login(c *gin.Context) {
@@ -106,16 +118,12 @@ func Login(c *gin.Context) {
 	isUserExisted := CheckAccountLogin(bodyReq.PhoneNumber, bodyReq.Password, c)
 	fmt.Println("isUserExisted", isUserExisted)
 	if isUserExisted {
-		user := models.User{Type: 2, Message: "Loggin Success", Status: "200"}
+		user := models.User{Type: 2, Status: strconv.Itoa(http.StatusOK), PhoneNumber: bodyReq.PhoneNumber}
 		DB.Model(&user).Where("phone_number = ?", bodyReq.PhoneNumber).Updates(&user)
-		commons.Response(c, http.StatusFound, &user)
-	} else {
-		errorRes := models.Response{
-			Message:    "Tài khoản chưa tồn tại trên hệ thống.",
-			StatusCode: http.StatusBadRequest,
-		}
-		commons.Errors(c, http.StatusBadRequest, &errorRes)
+		commons.Response(c, http.StatusOK, &user)
+		return
 	}
+	return
 }
 
 func SendOTP(c *gin.Context) {
@@ -124,7 +132,9 @@ func SendOTP(c *gin.Context) {
 	params := &openapi.CreateVerificationParams{}
 	params.SetTo(bodyReq.PhoneNumber)
 	params.SetChannel("sms")
-	resp, err := CLIENT.VerifyV2.CreateVerification(VERIFY_SERVICE_SID, params)
+	configs, _ := configs.LoadConfig(".")
+	fmt.Println("configs", configs.TwilioAccountSid)
+	resp, err := CLIENT.VerifyV2.CreateVerification(configs.TwilioVerifySid, params)
 	if err != nil {
 		fmt.Println("Eroorrrr sent otp", err.Error())
 		errorRes := models.Response{
@@ -132,6 +142,7 @@ func SendOTP(c *gin.Context) {
 			StatusCode: http.StatusInternalServerError,
 		}
 		commons.Errors(c, http.StatusInternalServerError, &errorRes)
+		return
 	} else {
 		fmt.Printf("Sent verification '%s'\n", *resp.Sid)
 		otpRes := models.OTPResponse{
@@ -139,126 +150,182 @@ func SendOTP(c *gin.Context) {
 			Message: "OTP was sent!",
 		}
 		commons.Response(c, http.StatusOK, &otpRes)
+		return
 	}
 }
 
 func VerifyOTP(c *gin.Context) {
 	var verifyOTP models.UserRequestInfo
-	var user models.User
 	c.BindJSON(&verifyOTP)
+	var user models.User
 	params := &openapi.CreateVerificationCheckParams{}
+	configs, _ := configs.LoadConfig(".")
 	params.SetTo(verifyOTP.PhoneNumber)
 	params.SetCode(verifyOTP.OTP)
-
-	resp, err := CLIENT.VerifyV2.CreateVerificationCheck(VERIFY_SERVICE_SID, params)
+	isVerified, phoneLengh, errCheckUser := CheckUserIsExist(verifyOTP.PhoneNumber)
+	fmt.Println("check user exist", isVerified)
+	fmt.Println("phoneLengh", phoneLengh)
+	fmt.Println("errCheckUser", errCheckUser)
+	resp, errVerifyOTP := CLIENT.VerifyV2.CreateVerificationCheck(configs.TwilioVerifySid, params)
 	keyHash := commons.CreateHashKey()
 	hashedPassword := commons.EncryptPassword(verifyOTP.Password, keyHash)
-	if err != nil {
-		fmt.Println(err.Error())
-		errorRes := models.Response{
-			Message:    "Lỗi gửi mã xác nhận.Xin vui lòng thử lại.",
-			StatusCode: http.StatusAccepted,
+	errType := DB.Raw("SELECT id,type FROM users WHERE phone_number = ?", verifyOTP.PhoneNumber).Scan(&user).Error
+	fmt.Print("access_token", user.ID)
+
+	if errCheckUser != nil || errType != nil {
+		errRes := models.ErrorsResponse{
+			StatusCode: http.StatusInternalServerError,
+			Message:    "Internal Server Error !",
 		}
-		commons.Errors(c, http.StatusAccepted, &errorRes)
-	} else if *resp.Status == "approved" {
-		fmt.Println("Correct!")
-		isUserExisted := CheckUserIsExist(verifyOTP.PhoneNumber)
-		if isUserExisted {
-			userRes := models.User{
-				Message:           *resp.Status,
-				Type:              2,
-				IsVerified:        *resp.Status == "approved",
-				PhoneNumber:       verifyOTP.PhoneNumber,
-				Password:          hashedPassword,
-				KeyEncryptDecrypt: keyHash,
-				OTP:               verifyOTP.OTP,
-			}
-			err := DB.Model(&user).Where("phone_number = ?", verifyOTP.PhoneNumber).Updates(&userRes).Error
-			if err != nil {
-				errorRes := models.ErrorsResponse{
-					Message:    "Internal server",
-					StatusCode: http.StatusInternalServerError,
-				}
-				commons.Errors(c, http.StatusOK, &errorRes)
-				return
-			}
-			commons.Response(c, http.StatusOK, &userRes)
-		} else {
-			fmt.Printf("key to encrypt/decrypt : %s\n", keyHash)
-			fmt.Println("hashedPassword", hashedPassword)
-			user := models.User{
-				Status:            *resp.Status,
-				Message:           "Tạo tài khoản thành công !",
-				PhoneNumber:       verifyOTP.PhoneNumber,
-				Password:          hashedPassword,
-				OTP:               verifyOTP.OTP,
-				IsVerified:        *resp.Status == "approved",
-				KeyEncryptDecrypt: keyHash,
-				Type:              2,
-			}
-			DB.Create(&user)
-			commons.Response(c, http.StatusCreated, &user)
+		commons.Errors(c, http.StatusInternalServerError, errRes)
+		return
+	}
+
+	if phoneLengh > 0 && user.Type == 3 && isVerified && *resp.Status == "approved" {
+		res := models.User{
+			Type:        3,
+			IsVerified:  isVerified,
+			Code:        http.StatusOK,
+			PhoneNumber: verifyOTP.PhoneNumber,
+			Message:     "User forgot password",
 		}
-	} else {
-		fmt.Println("Incorrect!")
-		errorRes := models.Response{
-			Message:    "Mã xác nhận không đúng.Xin vui lòng thử lại.",
-			StatusCode: http.StatusFound,
+		DB.Model(&res).Where("phone_number = ?", verifyOTP.PhoneNumber).Updates(&res)
+		commons.Response(c, http.StatusOK, res)
+		return
+	}
+
+	if phoneLengh > 0 && *resp.Status == "approved" && user.Type == 2 {
+		fmt.Println("user.ID", user.ID)
+		fmt.Println("configs.AccessTokenExpiresIn", configs.AccessTokenExpiresIn)
+		fmt.Println("configs.AccessTokenPrivateKey", configs.AccessTokenPrivateKey)
+		access_token, _ := commons.CreateToken(configs.AccessTokenExpiresIn, user, configs.AccessTokenPrivateKey)
+		fmt.Println("access_token", access_token)
+		res := models.User{
+			Type:              2,
+			IsVerified:        *resp.Status == "approved",
+			Code:              http.StatusOK,
+			PhoneNumber:       verifyOTP.PhoneNumber,
+			Password:          hashedPassword,
+			KeyEncryptDecrypt: keyHash,
+			AccessToken:       access_token,
 		}
-		commons.Errors(c, http.StatusOK, &errorRes)
+
+		saveUser := models.User{
+			Type:        2,
+			IsVerified:  *resp.Status == "approved",
+			Code:        http.StatusOK,
+			PhoneNumber: verifyOTP.PhoneNumber,
+			AccessToken: access_token,
+		}
+		commons.Response(c, http.StatusOK, saveUser)
+		DB.Model(&res).Where("phone_number = ?", verifyOTP.PhoneNumber).Updates(&res)
+		return
+	}
+
+	if phoneLengh == 0 {
+		errorRes := models.ErrorsResponse{
+			Message:    "User does not exist.Please back to register!",
+			StatusCode: http.StatusBadRequest,
+		}
+		commons.Errors(c, http.StatusBadRequest, &errorRes)
+		return
+	}
+	if errVerifyOTP != nil && *resp.Status != "approved" {
+		errorRes := models.ErrorsResponse{
+			Message:    "OTP invalid.Please try again! ",
+			StatusCode: http.StatusBadRequest,
+		}
+		commons.Errors(c, http.StatusBadRequest, &errorRes)
+		return
 	}
 }
 
 func ForgotPassword(c *gin.Context) {
 	var bodyReq models.UserRequestInfo
-	var user models.User
 	c.BindJSON(&bodyReq)
 	fmt.Print("loggg", bodyReq.PhoneNumber)
 
-	isUserExist := CheckUserIsExist(user.PhoneNumber)
-	if isUserExist {
-		user := models.User{
-			Type:    3,
-			Message: "Forgot password",
+	is_verified, phoneLengh, err := CheckUserIsExist(bodyReq.PhoneNumber)
+	if err != nil {
+		errorRes := models.ErrorsResponse{
+			StatusCode: http.StatusInternalServerError,
+			Message:    "Internal Server Error",
 		}
-		commons.Response(c, http.StatusOK, &user)
+		commons.Errors(c, http.StatusInternalServerError, errorRes)
+		return
 	}
+	if is_verified && phoneLengh > 0 {
+		res := models.User{
+			Type:    3,
+			Message: "Update password",
+			Code:    http.StatusOK,
+		}
+		DB.Model(&res).Where("phone_number = ?", bodyReq.PhoneNumber).Updates(&res)
+		commons.Response(c, http.StatusOK, res)
+	}
+	return
+
 }
 
 func UpdatePassword(c *gin.Context) {
 	var bodyReq models.UserRequestInfo
+	var user models.User
 	c.BindJSON(&bodyReq)
 	fmt.Print("loggg", bodyReq.PhoneNumber)
-
-	isUserExist := CheckUserIsExist(bodyReq.PhoneNumber)
-	fmt.Println("isUserExist", isUserExist)
-	if isUserExist {
-		key := commons.CreateHashKey()
-		newHash := commons.EncryptPassword(bodyReq.Password, key)
-		user := models.User{
-			Message:           "Cập nhật mật khẩu thành công !",
-			PhoneNumber:       bodyReq.PhoneNumber,
-			Password:          newHash,
-			KeyEncryptDecrypt: key,
+	is_verified, phoneLengh, err := CheckUserIsExist(bodyReq.PhoneNumber)
+	errGetPass := DB.Raw("SELECT id, is_verified, phone_number,key_encrypt_decrypt,key_authorize, password FROM users WHERE phone_number = ?", bodyReq.PhoneNumber).Scan(&user).Error
+	decrypted, _ := commons.DecryptPassword(user.KeyEncryptDecrypt, user.Password)
+	fmt.Println("decrypted :", decrypted)
+	fmt.Println("is_verified", is_verified)
+	fmt.Println("phoneLengh", phoneLengh)
+	fmt.Println("err", err)
+	if errGetPass != nil {
+		user := models.ErrorsResponse{
+			StatusCode: http.StatusInternalServerError,
+			Message:    "Internal server",
 		}
-		err := DB.Model(&user).Where("phone_number = ?", bodyReq.PhoneNumber).Updates(&user).Error
-		if err != nil {
-			errorRes := models.ErrorsResponse{
-				Message:    "Internal server",
-				StatusCode: http.StatusInternalServerError,
+		commons.Errors(c, http.StatusInternalServerError, user)
+		return
+	}
+
+	if is_verified {
+		if bodyReq.OldPass == decrypted {
+			key := commons.CreateHashKey()
+			newHash := commons.EncryptPassword(bodyReq.NewPass, key)
+			user := models.User{
+				Message:           "Cập nhật mật khẩu thành công !",
+				PhoneNumber:       bodyReq.PhoneNumber,
+				Password:          newHash,
+				KeyEncryptDecrypt: key,
 			}
-			commons.Errors(c, http.StatusOK, &errorRes)
+			err := DB.Model(&user).Where("phone_number = ?", bodyReq.PhoneNumber).Updates(&user).Error
+			if err != nil {
+				errorRes := models.ErrorsResponse{
+					Message:    "Internal server",
+					StatusCode: http.StatusInternalServerError,
+				}
+				commons.Errors(c, http.StatusInternalServerError, &errorRes)
+				return
+			}
+			commons.Response(c, http.StatusOK, &user)
 			return
 		}
-		commons.Response(c, http.StatusOK, &user)
+		if bodyReq.NewPass == decrypted {
+			errorRes := models.ErrorsResponse{
+				Message:    "The new password must not be the same as the old password !",
+				StatusCode: http.StatusNotFound,
+			}
+			commons.Errors(c, http.StatusNotFound, &errorRes)
+			return
+		}
+
 	} else {
 		errorRes := models.ErrorsResponse{
-			Message:    "Số điện thoại không tồn tại.Vui lòng đăng ký để sử dụng.",
+			Message:    "Old password is incorrect!",
 			StatusCode: http.StatusNotFound,
 		}
 		commons.Errors(c, http.StatusNotFound, &errorRes)
-
+		return
 	}
-	return
 
 }
