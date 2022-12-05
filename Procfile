@@ -1,1 +1,1 @@
-web: bin/kenva-be
+web: bin/go-getting-started

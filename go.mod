@@ -1,4 +1,4 @@
-module example.com
+module example/kenva-be
 
 go 1.19
 
