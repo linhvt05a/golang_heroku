@@ -1,1 +1,1 @@
-web: /kenva-be
+web: app
