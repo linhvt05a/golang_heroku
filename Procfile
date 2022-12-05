@@ -1,1 +1,1 @@
-app: bin/kenva-be
+web: app
