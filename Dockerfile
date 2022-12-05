@@ -12,4 +12,4 @@ RUN go build -o /kenva-be
 
 EXPOSE 8080
 
-CMD [ "/kenva-be","main" ]
+CMD /app/bin/kenva-be
