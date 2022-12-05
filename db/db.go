@@ -16,7 +16,7 @@ func ConnectDB() *gorm.DB {
 		log.Fatalf("could not load config: %v", errEnv)
 	}
 	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
-		"password=%s dbname=%s sslmode=disable",
+		"password=%s dbname=%s sslmode=require",
 		config.Host, config.Port, config.User, config.Password, config.Name)
 	db, err := gorm.Open(postgres.Open(psqlInfo), &gorm.Config{})
 	if err != nil {

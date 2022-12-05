@@ -1,1 +1,1 @@
-web: bin/kenva-be
+web: kenva-be
