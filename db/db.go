@@ -5,6 +5,7 @@ import (
 	"example/kenva-be/models"
 	"fmt"
 	"log"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -14,7 +15,10 @@ func ConnectDB() *gorm.DB {
 	if errEnv != nil {
 		log.Fatalf("could not load config: %v", errEnv)
 	}
-	db, err := gorm.Open(postgres.Open(config.PostgresUrl), &gorm.Config{})
+	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
+		"password=%s dbname=%s sslmode=disable",
+		config.Host, config.Port, config.User, config.Password, config.Name)
+	db, err := gorm.Open(postgres.Open(psqlInfo), &gorm.Config{})
 	if err != nil {
 		log.Fatal("Failed to connect DB")
 		return nil
