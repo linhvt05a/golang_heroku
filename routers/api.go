@@ -8,6 +8,8 @@ import (
 
 func Router() {
 	router := gin.Default()
+	// gin.SetMode(gin.ReleaseMode)
+	router.SetTrustedProxies([]string{"192.168.10.1"})
 	router.POST("/register", handlers.Register)
 	router.POST("/login", handlers.Login)
 	router.POST("/send-otp", handlers.SendOTP)

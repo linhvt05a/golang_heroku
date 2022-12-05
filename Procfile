@@ -1,1 +1,1 @@
-app: bin/go-getting-started
+app: bin/kenva-be

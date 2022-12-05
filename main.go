@@ -1,11 +1,17 @@
 package main
 
 import (
-	"example/kenva-be/db"
-	"example/kenva-be/routers"
+	"fmt"
+	"os"
 )
 
+// "example/kenva-be/db"
+// "example/kenva-be/routers"
+
 func main() {
-	db.ConnectDB()
-	routers.Router()
+	KEY := os.Getenv("TEST")
+	fmt.Println("key", KEY)
+	// db.ConnectDB()
+	// routers.Router()
+
 }
